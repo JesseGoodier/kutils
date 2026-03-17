@@ -1,0 +1,258 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        id: govulncheck
+        run: |
+          set +e
+          OUTPUT=$(govulncheck ./... 2>&1)
+          EXIT_CODE=$?
+          echo "$OUTPUT"
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          echo "output<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$OUTPUT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          exit $EXIT_CODE
+
+      - name: Write security summary
+        if: always()
+        run: |
+          if [ "${{ steps.govulncheck.outputs.exit_code }}" = "0" ]; then
+            echo "## Security Scan" >> "$GITHUB_STEP_SUMMARY"
+            echo "✅ No vulnerabilities found" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Security Scan" >> "$GITHUB_STEP_SUMMARY"
+            echo "❌ Vulnerabilities found — release blocked" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "${{ steps.govulncheck.outputs.output }}" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  version:
+    name: Bump version
+    needs: security
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Bump version
+        id: bump
+        run: |
+          CURRENT=$(cat VERSION | tr -d '[:space:]')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "${{ github.event.inputs.bump }}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "$NEW_VERSION" > VERSION
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: release v${{ steps.bump.outputs.new_version }}"
+          git tag -a "v${{ steps.bump.outputs.new_version }}" -m "Release v${{ steps.bump.outputs.new_version }}"
+          git push origin HEAD --tags
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.version.outputs.new_version }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build kgc and kgpv
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION=${{ needs.version.outputs.new_version }}
+          KGC_BIN=kgc
+          KGPV_BIN=kgpv
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            KGC_BIN=kgc.exe
+            KGPV_BIN=kgpv.exe
+          fi
+          go build -ldflags "-s -w -X main.version=${VERSION}" -o "${KGC_BIN}" ./cmd/kgc
+          go build -ldflags "-s -w -X main.version=${VERSION}" -o "${KGPV_BIN}" ./cmd/kgpv
+
+      - name: Package artifacts
+        run: |
+          VERSION=${{ needs.version.outputs.new_version }}
+          OS=${{ matrix.goos }}
+          ARCH=${{ matrix.goarch }}
+
+          if [ "$OS" = "windows" ]; then
+            zip "kgc_${VERSION}_${OS}_${ARCH}.zip" kgc.exe
+            zip "kgpv_${VERSION}_${OS}_${ARCH}.zip" kgpv.exe
+            echo "KGC_ARTIFACT=kgc_${VERSION}_${OS}_${ARCH}.zip" >> "$GITHUB_ENV"
+            echo "KGPV_ARTIFACT=kgpv_${VERSION}_${OS}_${ARCH}.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "kgc_${VERSION}_${OS}_${ARCH}.tar.gz" kgc
+            tar czf "kgpv_${VERSION}_${OS}_${ARCH}.tar.gz" kgpv
+            echo "KGC_ARTIFACT=kgc_${VERSION}_${OS}_${ARCH}.tar.gz" >> "$GITHUB_ENV"
+            echo "KGPV_ARTIFACT=kgpv_${VERSION}_${OS}_${ARCH}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload kgc artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.KGC_ARTIFACT }}
+          path: ${{ env.KGC_ARTIFACT }}
+          if-no-files-found: error
+
+      - name: Upload kgpv artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.KGPV_ARTIFACT }}
+          path: ${{ env.KGPV_ARTIFACT }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: sha256sum * > checksums.txt
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          VERSION=${{ needs.version.outputs.new_version }}
+          gh release create "v${VERSION}" \
+            --generate-notes \
+            artifacts/*
+
+      - name: Write release summary
+        run: |
+          VERSION=${{ needs.version.outputs.new_version }}
+          echo "## Release v${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Artifact | Size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          for f in artifacts/*; do
+            NAME=$(basename "$f")
+            SIZE=$(du -sh "$f" | cut -f1)
+            echo "| \`${NAME}\` | ${SIZE} |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+  update-homebrew:
+    name: Update Homebrew tap
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout homebrew-kutils
+        uses: actions/checkout@v6
+        with:
+          repository: jessegoodier/homebrew-kutils
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-kutils
+
+      - name: Download checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          VERSION=${{ needs.version.outputs.new_version }}
+          gh release download "v${VERSION}" --pattern "checksums.txt" --dir /tmp/checksums
+
+      - name: Update formula versions and checksums
+        run: |
+          VERSION=${{ needs.version.outputs.new_version }}
+          CHECKSUMS=/tmp/checksums/checksums.txt
+
+          for TOOL in kgc kgpv; do
+            DARWIN_AMD64=$(grep "${TOOL}_${VERSION}_darwin_amd64.tar.gz" "$CHECKSUMS" | awk '{print $1}')
+            DARWIN_ARM64=$(grep "${TOOL}_${VERSION}_darwin_arm64.tar.gz" "$CHECKSUMS" | awk '{print $1}')
+            LINUX_AMD64=$(grep  "${TOOL}_${VERSION}_linux_amd64.tar.gz"  "$CHECKSUMS" | awk '{print $1}')
+            LINUX_ARM64=$(grep  "${TOOL}_${VERSION}_linux_arm64.tar.gz"  "$CHECKSUMS" | awk '{print $1}')
+            FORMULA="homebrew-kutils/Formula/${TOOL}.rb"
+
+            sed -i "s|version \".*\"|version \"${VERSION}\"|" "$FORMULA"
+            # Update sha256 values by matching the comment marker on each line
+            sed -i "s|sha256 \".*\" # darwin_amd64|sha256 \"${DARWIN_AMD64}\" # darwin_amd64|" "$FORMULA"
+            sed -i "s|sha256 \".*\" # darwin_arm64|sha256 \"${DARWIN_ARM64}\" # darwin_arm64|" "$FORMULA"
+            sed -i "s|sha256 \".*\" # linux_amd64|sha256 \"${LINUX_AMD64}\" # linux_amd64|" "$FORMULA"
+            sed -i "s|sha256 \".*\" # linux_arm64|sha256 \"${LINUX_ARM64}\" # linux_arm64|" "$FORMULA"
+          done
+
+      - name: Commit and push
+        working-directory: homebrew-kutils
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/
+          git commit -m "chore: update formulas to v${{ needs.version.outputs.new_version }}"
+          git push
