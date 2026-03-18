@@ -296,7 +296,7 @@ func printRow(r containerRow, widths []int, allNamespaces bool, showImage bool, 
 		case "CONTAINER":
 			segment = color.FgCyan.Sprint(padded)
 		case "READY":
-			if r.ready {
+			if r.ready || r.podStatus == "Completed" {
 				segment = color.FgGreen.Sprint(padded)
 			} else {
 				segment = color.FgRed.Sprint(padded)
@@ -372,6 +372,8 @@ func rowCols(r containerRow, allNamespaces bool, showImage bool) []string {
 	readyStr := "false"
 	if r.ready {
 		readyStr = "true"
+	} else if r.podStatus == "Completed" {
+		readyStr = "Completed"
 	}
 	cols := []string{r.podName, r.container, readyStr, fmt.Sprintf("%d", r.restarts), r.age, r.lastReason}
 	if showImage {
