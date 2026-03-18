@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -31,20 +32,24 @@ func init() {
 }
 
 type PVInfo struct {
-	Namespace    string
-	Zone         string
-	SizeGi       string
-	StorageClass string
-	PVCName      string
-	PVName       string
-	Pod          string
+	Namespace     string
+	Zone          string
+	SizeGi        string
+	StorageClass  string
+	PVCName       string
+	PVName        string
+	Pod           string
+	ReclaimPolicy string
 }
 
 func main() {
 	// Parse flags
 	hidePod := flag.Bool("hide-pod", false, "Hide pod column")
 	showPVName := flag.Bool("show-pv-name", false, "Show PV name column")
+	showReclaimPolicy := flag.Bool("show-reclaim-policy", false, "Show reclaim policy column")
+	allFields := flag.Bool("show-all-fields", false, "Show all columns")
 	sortBy := flag.String("sort", "namespace", "Sort by column: namespace, pod, zone, size, pvc, pv")
+	outputFormat := flag.String("output", "", "Output format: csv, json, yaml")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.BoolVar(showVersion, "v", false, "Print version and exit")
 	flag.Parse()
@@ -52,6 +57,13 @@ func main() {
 	if *showVersion {
 		fmt.Println(version)
 		os.Exit(0)
+	}
+
+	// --show-all-fields enables every optional column
+	if *allFields {
+		*hidePod = false
+		*showPVName = true
+		*showReclaimPolicy = true
 	}
 
 	showPod := !*hidePod
@@ -70,6 +82,7 @@ func main() {
 	}
 	sizeColor := color.New(color.FgCyan)
 	unboundColor := color.New(color.FgLightRed, color.OpBold)
+	reclaimColor := color.New(color.FgWhite)
 
 	// Load kubeconfig
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -161,6 +174,9 @@ func main() {
 
 			// Get storage class
 			info.StorageClass = getStringValue(pvMap, "spec", "storageClassName")
+
+			// Get reclaim policy
+			info.ReclaimPolicy = getStringValue(pvMap, "spec", "persistentVolumeReclaimPolicy")
 
 			// Get zone from node affinity
 			if nodeAffinity := getMapValue(pvMap, "spec", "nodeAffinity"); nodeAffinity != nil {
@@ -255,6 +271,21 @@ func main() {
 		return a.PVCName < b.PVCName
 	})
 
+	// Structured output formats
+	switch *outputFormat {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(infos)
+		return
+	case "yaml":
+		printYAMLOutput(infos)
+		return
+	case "csv":
+		printCSVOutput(infos, showPod, *showPVName, *showReclaimPolicy)
+		return
+	}
+
 	// Assign a stable color to each unique zone in sorted order
 	zoneColors := make(map[string]color.Style)
 	for _, info := range infos {
@@ -271,6 +302,7 @@ func main() {
 	maxSC := len("STORAGE-CLASS")
 	maxPVC := len("PVC")
 	maxPV := len("PV NAME")
+	maxReclaim := len("RECLAIM-POLICY")
 
 	for _, info := range infos {
 		if len(info.Namespace) > maxNs {
@@ -294,6 +326,9 @@ func main() {
 		if *showPVName && len(info.PVName) > maxPV {
 			maxPV = len(info.PVName)
 		}
+		if *showReclaimPolicy && len(info.ReclaimPolicy) > maxReclaim {
+			maxReclaim = len(info.ReclaimPolicy)
+		}
 	}
 
 	// Add padding
@@ -304,23 +339,27 @@ func main() {
 	maxSC += 2
 	maxPVC += 2
 	maxPV += 2
+	maxReclaim += 2
 
-	// Print header - NAMESPACE, POD, ZONE, SIZE, STORAGE-CLASS, PVC, [PV NAME]
-	if showPod && *showPVName {
-		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s\n",
-			maxNs, "NAMESPACE", maxPod, "POD", maxZone, "ZONE", maxSize, "SIZE", maxSC, "STORAGE-CLASS", maxPVC, "PVC", maxPV, "PV NAME")
-	} else if showPod {
-		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s %-*s\n",
-			maxNs, "NAMESPACE", maxPod, "POD", maxZone, "ZONE", maxSize, "SIZE", maxSC, "STORAGE-CLASS", maxPVC, "PVC")
-	} else if *showPVName {
-		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s %-*s\n",
-			maxNs, "NAMESPACE", maxZone, "ZONE", maxSize, "SIZE", maxSC, "STORAGE-CLASS", maxPVC, "PVC", maxPV, "PV NAME")
-	} else {
-		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s\n",
-			maxNs, "NAMESPACE", maxZone, "ZONE", maxSize, "SIZE", maxSC, "STORAGE-CLASS", maxPVC, "PVC")
+	// Build and print header
+	var hdr strings.Builder
+	hdr.WriteString(fmt.Sprintf("%-*s ", maxNs, "NAMESPACE"))
+	if showPod {
+		hdr.WriteString(fmt.Sprintf("%-*s ", maxPod, "POD"))
 	}
+	hdr.WriteString(fmt.Sprintf("%-*s ", maxZone, "ZONE"))
+	hdr.WriteString(fmt.Sprintf("%-*s ", maxSize, "SIZE"))
+	hdr.WriteString(fmt.Sprintf("%-*s ", maxSC, "STORAGE-CLASS"))
+	hdr.WriteString(fmt.Sprintf("%-*s", maxPVC, "PVC"))
+	if *showPVName {
+		hdr.WriteString(fmt.Sprintf(" %-*s", maxPV, "PV NAME"))
+	}
+	if *showReclaimPolicy {
+		hdr.WriteString(fmt.Sprintf(" %-*s", maxReclaim, "RECLAIM-POLICY"))
+	}
+	headerColor.Println(hdr.String())
 
-	// Print results - NAMESPACE, POD, ZONE, SIZE, PVC, [PV NAME]
+	// Print rows
 	for _, info := range infos {
 		if info.Namespace == "null" {
 			unboundColor.Printf("%-*s ", maxNs, info.Namespace)
@@ -357,7 +396,67 @@ func main() {
 			fmt.Print(" ")
 			pvColor.Printf("%-*s", maxPV, info.PVName)
 		}
+
+		if *showReclaimPolicy {
+			fmt.Print(" ")
+			reclaimColor.Printf("%-*s", maxReclaim, info.ReclaimPolicy)
+		}
+
 		fmt.Println()
+	}
+}
+
+func printYAMLOutput(infos []PVInfo) {
+	fmt.Println("---")
+	for _, info := range infos {
+		fmt.Printf("- namespace: %s\n", yamlStr(info.Namespace))
+		fmt.Printf("  pod: %s\n", yamlStr(info.Pod))
+		fmt.Printf("  zone: %s\n", yamlStr(info.Zone))
+		fmt.Printf("  size: %s\n", yamlStr(info.SizeGi))
+		fmt.Printf("  storageClass: %s\n", yamlStr(info.StorageClass))
+		fmt.Printf("  pvc: %s\n", yamlStr(info.PVCName))
+		fmt.Printf("  pvName: %s\n", yamlStr(info.PVName))
+		fmt.Printf("  reclaimPolicy: %s\n", yamlStr(info.ReclaimPolicy))
+	}
+}
+
+func yamlStr(s string) string {
+	if strings.ContainsAny(s, `:{}[]|>&*!,"`) || strings.Contains(s, "  ") {
+		return fmt.Sprintf("%q", s)
+	}
+	return s
+}
+
+func printCSVOutput(infos []PVInfo, showPod, showPVName, showReclaimPolicy bool) {
+	w := csv.NewWriter(os.Stdout)
+	defer w.Flush()
+
+	header := []string{"NAMESPACE"}
+	if showPod {
+		header = append(header, "POD")
+	}
+	header = append(header, "ZONE", "SIZE", "STORAGE-CLASS", "PVC")
+	if showPVName {
+		header = append(header, "PV NAME")
+	}
+	if showReclaimPolicy {
+		header = append(header, "RECLAIM-POLICY")
+	}
+	w.Write(header)
+
+	for _, info := range infos {
+		row := []string{info.Namespace}
+		if showPod {
+			row = append(row, info.Pod)
+		}
+		row = append(row, info.Zone, info.SizeGi, info.StorageClass, info.PVCName)
+		if showPVName {
+			row = append(row, info.PVName)
+		}
+		if showReclaimPolicy {
+			row = append(row, info.ReclaimPolicy)
+		}
+		w.Write(row)
 	}
 }
 

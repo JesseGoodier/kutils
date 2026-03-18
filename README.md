@@ -1,11 +1,26 @@
-# kutils
+# kutils <!-- omit from toc -->
 
 Kubernetes CLI utilities.
+
+- [Tools](#tools)
+- [Installation](#installation)
+  - [Homebrew (macOS and Linux)](#homebrew-macos-and-linux)
+  - [go install](#go-install)
+  - [Build from source](#build-from-source)
+- [kgc](#kgc)
+  - [Features](#features)
+  - [Usage](#usage)
+- [kgpv](#kgpv)
+  - [Features](#features-1)
+  - [Usage](#usage-1)
+- [Requirements](#requirements)
+- [License](#license)
+
 
 ## Tools
 
 - **[kgc](#kgc)** — `kubectl get pods` with color-coded status and last restart reason
-- **[kgpv](#kgpv)** — List PersistentVolumes with bound PVCs, pods, zones, and sizes
+- **[kgpv](#kgpv)** — List PersistentVolumes with bound PVCs, pods, zones, storageClass and sizes
 
 ## Installation
 
@@ -43,7 +58,7 @@ Like `kubectl get pods`, but focused on containers and highlighting the last res
 kgc -A
 NAMESPACE    NAME                                        READY  STATUS     RESTARTS  AGE    LAST RESTART REASON
 monitoring   prometheus-kube-prometheus-stack-0          2/2    Running    0         2d23h
-opencost     opencost-9fcf95fc8-6jtns                    2/2    Running    3         2d23h  opencost: Error
+opencost     opencost-9fcf95fc8-6tns1                    2/2    Running    3         2d23h  opencost: Error
 ```
 
 ### Features
@@ -61,13 +76,14 @@ opencost     opencost-9fcf95fc8-6jtns                    2/2    Running    3    
 kgc [flags]
 
 Flags:
-  -n <namespace>     Namespace to list pods in (default: current context's namespace)
-  -A                 List pods across all namespaces
-  -w                 Watch for pod changes
-  -r                 Only show pods with restarts
-  -kubeconfig <path> Path to kubeconfig file (default: $KUBECONFIG, then ~/.kube/config)
-  -v, -version       Print version and exit
-  -h, -help          Show help
+  -n, --namespace <namespace>  Namespace to list pods in.  (default: current context)
+  -A                           List pods across all namespaces.
+  -w, --watch                  Watch for pod changes.
+  -r, --has-restarts           Only show pods with restarts.
+  --show-image                 Show container image column.
+  --kubeconfig <path>          Path to kubeconfig file.
+  -v, --version                Print version and exit.
+  -h, --help                   Show this help message.
 ```
 
 ---
@@ -98,9 +114,13 @@ production   worker-xyz789          us-east-1b    50Gi  worker-storage
 kgpv [flags]
 
 Flags:
-  --hide-pod      Hide the pod column
-  --show-pv-name  Show the PV name column
-  -v, -version    Print version and exit
+  --hide-pod             Hide the pod column.
+  --show-pv-name         Show the PV name column.
+  --show-reclaim-policy  Show the reclaim policy column.
+  --show-all-fields           Show all columns.
+  --sort <column>        Sort by column: namespace, pod, zone, size, pvc, pv.  (default: namespace)
+  --output <format>      Output format: csv, json, yaml.
+  -v, --version          Print version and exit.
 ```
 
 ---
