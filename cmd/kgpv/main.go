@@ -31,12 +31,13 @@ func init() {
 }
 
 type PVInfo struct {
-	Namespace string
-	Zone      string
-	SizeGi    string
-	PVCName   string
-	PVName    string
-	Pod       string
+	Namespace    string
+	Zone         string
+	SizeGi       string
+	StorageClass string
+	PVCName      string
+	PVName       string
+	Pod          string
 }
 
 func main() {
@@ -132,12 +133,13 @@ func main() {
 			json.Unmarshal(pvData, &pvMap)
 
 			info := PVInfo{
-				Namespace: "--NONE--",
-				Zone:      "--UNKNOWN--",
-				SizeGi:    "0",
-				PVCName:   "--UNBOUND--",
-				PVName:    getStringValue(pvMap, "metadata", "name"),
-				Pod:       "--NONE--",
+				Namespace:    "null",
+				Zone:         "UNKNOWN",
+				SizeGi:       "0",
+				StorageClass: "",
+				PVCName:      "UNBOUND",
+				PVName:       getStringValue(pvMap, "metadata", "name"),
+				Pod:          "null",
 			}
 
 			// Get size in Gi
@@ -157,6 +159,9 @@ func main() {
 				}
 			}
 
+			// Get storage class
+			info.StorageClass = getStringValue(pvMap, "spec", "storageClassName")
+
 			// Get zone from node affinity
 			if nodeAffinity := getMapValue(pvMap, "spec", "nodeAffinity"); nodeAffinity != nil {
 				if required := getMapValue(nodeAffinity, "required"); required != nil {
@@ -165,7 +170,7 @@ func main() {
 							if exprs := getArrayValue(term, "matchExpressions"); len(exprs) > 0 {
 								for _, expr := range exprs {
 									if exprMap, ok := expr.(map[string]interface{}); ok {
-										if key := getStringFromMap(exprMap, "key"); key == "topology.kubernetes.io/zone" {
+										if key := getStringFromMap(exprMap, "key"); key == "topology.disk.csi.azure.com/zone" || key == "topology.kubernetes.io/zone" || key == "topology.gke.io/zone" {
 											if values := getArrayValue(exprMap, "values"); len(values) > 0 {
 												if zone, ok := values[0].(string); ok {
 													info.Zone = zone
@@ -181,9 +186,11 @@ func main() {
 			}
 
 			// Fallback: check labels for zone
-			if info.Zone == "--UNKNOWN--" {
+			if info.Zone == "UNKNOWN" {
 				if labels := getMapValue(pvMap, "metadata", "labels"); labels != nil {
 					if zone := getStringFromMap(labels, "topology.kubernetes.io/zone"); zone != "" {
+						info.Zone = zone
+					} else if zone := getStringFromMap(labels, "topology.gke.io/zone"); zone != "" {
 						info.Zone = zone
 					} else if zone := getStringFromMap(labels, "failure-domain.beta.kubernetes.io/zone"); zone != "" {
 						info.Zone = zone
@@ -261,6 +268,7 @@ func main() {
 	maxPod := len("POD")
 	maxZone := len("ZONE")
 	maxSize := len("SIZE")
+	maxSC := len("STORAGE-CLASS")
 	maxPVC := len("PVC")
 	maxPV := len("PV NAME")
 
@@ -277,6 +285,9 @@ func main() {
 		if len(info.SizeGi) > maxSize {
 			maxSize = len(info.SizeGi)
 		}
+		if len(info.StorageClass) > maxSC {
+			maxSC = len(info.StorageClass)
+		}
 		if len(info.PVCName) > maxPVC {
 			maxPVC = len(info.PVCName)
 		}
@@ -290,41 +301,42 @@ func main() {
 	maxNs += 2
 	maxZone += 2
 	maxSize += 2
+	maxSC += 2
 	maxPVC += 2
 	maxPV += 2
 
-	// Print header - NAMESPACE, POD, ZONE, SIZE, PVC, [PV NAME]
+	// Print header - NAMESPACE, POD, ZONE, SIZE, STORAGE-CLASS, PVC, [PV NAME]
 	if showPod && *showPVName {
-		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s %-*s\n",
-			maxNs, "NAMESPACE", maxPod, "POD", maxZone, "ZONE", maxSize, "SIZE", maxPVC, "PVC", maxPV, "PV NAME")
+		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s\n",
+			maxNs, "NAMESPACE", maxPod, "POD", maxZone, "ZONE", maxSize, "SIZE", maxSC, "STORAGE-CLASS", maxPVC, "PVC", maxPV, "PV NAME")
 	} else if showPod {
-		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s\n",
-			maxNs, "NAMESPACE", maxPod, "POD", maxZone, "ZONE", maxSize, "SIZE", maxPVC, "PVC")
+		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s %-*s\n",
+			maxNs, "NAMESPACE", maxPod, "POD", maxZone, "ZONE", maxSize, "SIZE", maxSC, "STORAGE-CLASS", maxPVC, "PVC")
 	} else if *showPVName {
-		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s\n",
-			maxNs, "NAMESPACE", maxZone, "ZONE", maxSize, "SIZE", maxPVC, "PVC", maxPV, "PV NAME")
+		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s %-*s\n",
+			maxNs, "NAMESPACE", maxZone, "ZONE", maxSize, "SIZE", maxSC, "STORAGE-CLASS", maxPVC, "PVC", maxPV, "PV NAME")
 	} else {
-		headerColor.Printf("%-*s %-*s %-*s %-*s\n",
-			maxNs, "NAMESPACE", maxZone, "ZONE", maxSize, "SIZE", maxPVC, "PVC")
+		headerColor.Printf("%-*s %-*s %-*s %-*s %-*s\n",
+			maxNs, "NAMESPACE", maxZone, "ZONE", maxSize, "SIZE", maxSC, "STORAGE-CLASS", maxPVC, "PVC")
 	}
 
 	// Print results - NAMESPACE, POD, ZONE, SIZE, PVC, [PV NAME]
 	for _, info := range infos {
-		if info.Namespace == "--NONE--" {
+		if info.Namespace == "null" {
 			unboundColor.Printf("%-*s ", maxNs, info.Namespace)
 		} else {
 			nsColor.Printf("%-*s ", maxNs, info.Namespace)
 		}
 
 		if showPod {
-			if info.Pod == "--NONE--" {
+			if info.Pod == "null" {
 				unboundColor.Printf("%-*s ", maxPod, info.Pod)
 			} else {
 				podColor.Printf("%-*s ", maxPod, info.Pod)
 			}
 		}
 
-		if info.Zone == "--UNKNOWN--" {
+		if info.Zone == "UNKNOWN" {
 			unboundColor.Printf("%-*s ", maxZone, info.Zone)
 		} else {
 			zc := zoneColors[info.Zone]
@@ -333,7 +345,9 @@ func main() {
 
 		sizeColor.Printf("%-*s ", maxSize, info.SizeGi)
 
-		if info.PVCName == "--UNBOUND--" {
+		pvColor.Printf("%-*s ", maxSC, info.StorageClass)
+
+		if info.PVCName == "UNBOUND" {
 			unboundColor.Printf("%-*s", maxPVC, info.PVCName)
 		} else {
 			pvcColor.Printf("%-*s", maxPVC, info.PVCName)
@@ -380,7 +394,6 @@ func parseStorageToGi(storage string) string {
 		return fmt.Sprintf("%.2fGi", value/1024/1024/1024)
 	}
 }
-
 
 // Helper functions to safely navigate nested maps
 func getMapValue(m map[string]interface{}, keys ...string) map[string]interface{} {
