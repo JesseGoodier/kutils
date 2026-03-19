@@ -2,7 +2,6 @@
 
 Kubernetes CLI utilities.
 
-- [Tools](#tools)
 - [Installation](#installation)
   - [Homebrew (macOS and Linux)](#homebrew-macos-and-linux)
   - [go install](#go-install)
@@ -17,7 +16,7 @@ Kubernetes CLI utilities.
 - [License](#license)
 
 
-## Tools
+## Tools <!-- omit from toc -->
 
 - **[kgc](#kgc)** — `kubectl get pods` with color-coded status and last restart reason
 - **[kgpv](#kgpv)** — List PersistentVolumes with bound PVCs, pods, zones, storageClass and sizes
