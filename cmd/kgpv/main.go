@@ -42,6 +42,37 @@ type PVInfo struct {
 	ReclaimPolicy string
 }
 
+func printCompletions(shell string) {
+	switch shell {
+	case "bash":
+		fmt.Print(`_kgpv_completions() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local opts="--hide-pod --show-pv-name --show-reclaim-policy --show-all-fields --sort --output --completions -v --version"
+    COMPREPLY=($(compgen -W "${opts}" -- "${cur}"))
+}
+complete -F _kgpv_completions kgpv
+`)
+	case "zsh":
+		fmt.Print(`#compdef kgpv
+_kgpv() {
+    _arguments \
+        '--hide-pod[Hide pod column]' \
+        '--show-pv-name[Show PV name column]' \
+        '--show-reclaim-policy[Show reclaim policy column]' \
+        '--show-all-fields[Show all columns]' \
+        '--sort[Sort by column]:column:(namespace pod zone size pvc pv)' \
+        '--output[Output format]:format:(csv json yaml)' \
+        '--completions[Print shell completion script]:shell:(bash zsh)' \
+        '(-v --version)'{-v,--version}'[Print version and exit]'
+}
+_kgpv
+`)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown shell %q: use bash or zsh\n", shell)
+		os.Exit(1)
+	}
+}
+
 func main() {
 	// Parse flags
 	hidePod := flag.Bool("hide-pod", false, "Hide pod column")
@@ -52,7 +83,13 @@ func main() {
 	outputFormat := flag.String("output", "", "Output format: csv, json, yaml")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.BoolVar(showVersion, "v", false, "Print version and exit")
+	completionsFlag := flag.String("completions", "", "Print shell completion script (bash or zsh)")
 	flag.Parse()
+
+	if *completionsFlag != "" {
+		printCompletions(*completionsFlag)
+		return
+	}
 
 	if *showVersion {
 		fmt.Println(version)

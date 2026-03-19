@@ -88,9 +88,42 @@ func printUsage(kubeconfigDefault string) {
 	row("-r, --has-restarts", "", "Only show pods with restarts.", "")
 	row("--show-image", "", "Show container image column.", "")
 	row("--kubeconfig", "path", "Path to kubeconfig file.", kubeconfigDefault)
+	row("--completions", "shell", "Print shell completion script (bash or zsh).", "")
 	row("-v, --version", "", "Print version and exit.", "")
 	row("-h, --help", "", "Show this help message.", "")
 	fmt.Println()
+}
+
+func printCompletions(shell string) {
+	switch shell {
+	case "bash":
+		fmt.Print(`_kgc_completions() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local opts="-n --namespace -A -w --watch -r --has-restarts --show-image --kubeconfig --completions -v --version -h --help"
+    COMPREPLY=($(compgen -W "${opts}" -- "${cur}"))
+}
+complete -F _kgc_completions kgc
+`)
+	case "zsh":
+		fmt.Print(`#compdef kgc
+_kgc() {
+    _arguments \
+        '(-n --namespace)'{-n,--namespace}'[Namespace to list pods in]:namespace:' \
+        '-A[List pods across all namespaces]' \
+        '(-w --watch)'{-w,--watch}'[Watch for pod changes]' \
+        '(-r --has-restarts)'{-r,--has-restarts}'[Only show pods with restarts]' \
+        '--show-image[Show container image column]' \
+        '--kubeconfig[Path to kubeconfig file]:file:_files' \
+        '--completions[Print shell completion script]:shell:(bash zsh)' \
+        '(-v --version)'{-v,--version}'[Print version and exit]' \
+        '(-h --help)'{-h,--help}'[Show this help message]'
+}
+_kgc
+`)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown shell %q: use bash or zsh\n", shell)
+		os.Exit(1)
+	}
 }
 
 func main() {
@@ -117,8 +150,15 @@ func main() {
 	versionFlag := flag.Bool("version", false, "")
 	flag.BoolVar(versionFlag, "v", false, "")
 
+	completionsFlag := flag.String("completions", "", "")
+
 	flag.Usage = func() { printUsage(kubeconfigDefault) }
 	flag.Parse()
+
+	if *completionsFlag != "" {
+		printCompletions(*completionsFlag)
+		return
+	}
 
 	if *versionFlag {
 		fmt.Println("kgc", version)
