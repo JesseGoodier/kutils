@@ -56,8 +56,9 @@ fmt:
 tidy:
     go mod tidy
 
-# Update all dependencies to latest and tidy
+# Update the Go toolchain directive and all dependencies to latest, then tidy
 update:
+    go get go@latest toolchain@latest
     go get -u ./...
     go mod tidy
 
