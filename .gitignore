@@ -34,3 +34,7 @@ go.work.sum
 /kgpv
 .kubeconfig
 /kgps
+
+# Build output (justfile)
+/bin/
+/dist/
