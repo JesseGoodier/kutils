@@ -15,7 +15,6 @@ Kubernetes CLI utilities.
 - [Requirements](#requirements)
 - [License](#license)
 
-
 ## Tools <!-- omit from toc -->
 
 - **[kgc](#kgc)** — `kubectl get pods` with color-coded status and last restart reason
