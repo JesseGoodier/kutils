@@ -1,6 +1,6 @@
 module github.com/jessegoodier/kutils
 
-go 1.26.1
+go 1.26.4
 
 require (
 	github.com/gookit/color v1.6.1
