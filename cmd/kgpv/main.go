@@ -180,7 +180,7 @@ func main() {
 
 			pvData, _ := json.Marshal(pv)
 			var pvMap map[string]interface{}
-			json.Unmarshal(pvData, &pvMap)
+			_ = json.Unmarshal(pvData, &pvMap)
 
 			info := PVInfo{
 				Namespace:    "null",
@@ -313,7 +313,7 @@ func main() {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(infos)
+		_ = enc.Encode(infos)
 		return
 	case "yaml":
 		printYAMLOutput(infos)
@@ -380,19 +380,19 @@ func main() {
 
 	// Build and print header
 	var hdr strings.Builder
-	hdr.WriteString(fmt.Sprintf("%-*s ", maxNs, "NAMESPACE"))
+	fmt.Fprintf(&hdr, "%-*s ", maxNs, "NAMESPACE")
 	if showPod {
-		hdr.WriteString(fmt.Sprintf("%-*s ", maxPod, "POD"))
+		fmt.Fprintf(&hdr, "%-*s ", maxPod, "POD")
 	}
-	hdr.WriteString(fmt.Sprintf("%-*s ", maxZone, "ZONE"))
-	hdr.WriteString(fmt.Sprintf("%-*s ", maxSize, "SIZE"))
-	hdr.WriteString(fmt.Sprintf("%-*s ", maxSC, "STORAGE-CLASS"))
-	hdr.WriteString(fmt.Sprintf("%-*s", maxPVC, "PVC"))
+	fmt.Fprintf(&hdr, "%-*s ", maxZone, "ZONE")
+	fmt.Fprintf(&hdr, "%-*s ", maxSize, "SIZE")
+	fmt.Fprintf(&hdr, "%-*s ", maxSC, "STORAGE-CLASS")
+	fmt.Fprintf(&hdr, "%-*s", maxPVC, "PVC")
 	if *showPVName {
-		hdr.WriteString(fmt.Sprintf(" %-*s", maxPV, "PV NAME"))
+		fmt.Fprintf(&hdr, " %-*s", maxPV, "PV NAME")
 	}
 	if *showReclaimPolicy {
-		hdr.WriteString(fmt.Sprintf(" %-*s", maxReclaim, "RECLAIM-POLICY"))
+		fmt.Fprintf(&hdr, " %-*s", maxReclaim, "RECLAIM-POLICY")
 	}
 	headerColor.Println(hdr.String())
 
@@ -479,7 +479,7 @@ func printCSVOutput(infos []PVInfo, showPod, showPVName, showReclaimPolicy bool)
 	if showReclaimPolicy {
 		header = append(header, "RECLAIM-POLICY")
 	}
-	w.Write(header)
+	_ = w.Write(header)
 
 	for _, info := range infos {
 		row := []string{info.Namespace}
@@ -493,14 +493,14 @@ func printCSVOutput(infos []PVInfo, showPod, showPVName, showReclaimPolicy bool)
 		if showReclaimPolicy {
 			row = append(row, info.ReclaimPolicy)
 		}
-		w.Write(row)
+		_ = w.Write(row)
 	}
 }
 
 // parseSizeFloat parses a formatted SizeGi string (e.g. "10Gi") back to a float for sorting.
 func parseSizeFloat(s string) float64 {
 	var v float64
-	fmt.Sscanf(s, "%f", &v)
+	_, _ = fmt.Sscanf(s, "%f", &v)
 	return v
 }
 
@@ -514,7 +514,7 @@ func parseStorageToGi(storage string) string {
 	var value float64
 	var unit string
 
-	fmt.Sscanf(storage, "%f%s", &value, &unit)
+	_, _ = fmt.Sscanf(storage, "%f%s", &value, &unit)
 
 	switch unit {
 	case "Gi", "G":

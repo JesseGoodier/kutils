@@ -40,16 +40,16 @@ func die(msg string, err error) {
 }
 
 type containerRow struct {
-	namespace   string
-	podName     string
-	firstInPod  bool // true only for the first container row of a pod
-	container   string
-	ready       bool
-	podStatus   string // used for color logic
-	restarts    int    // total for pod, shared across all container rows
-	age         string
-	lastReason  string // per-container last termination reason
-	image       string
+	namespace  string
+	podName    string
+	firstInPod bool // true only for the first container row of a pod
+	container  string
+	ready      bool
+	podStatus  string // used for color logic
+	restarts   int    // total for pod, shared across all container rows
+	age        string
+	lastReason string // per-container last termination reason
+	image      string
 }
 
 func printUsage(kubeconfigDefault string) {
