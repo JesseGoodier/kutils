@@ -20,13 +20,29 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
   security:
     name: Security scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -62,12 +78,12 @@ jobs:
 
   version:
     name: Bump version
-    needs: security
+    needs: [test, security]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -114,11 +130,11 @@ jobs:
           - goos: darwin
             goarch: arm64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: v${{ needs.version.outputs.new_version }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -214,7 +230,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout homebrew-kutils
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: jessegoodier/homebrew-kutils
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}

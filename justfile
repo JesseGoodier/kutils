@@ -1,10 +1,14 @@
 # kutils — task runner. Run `just` to list recipes.
 
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+# So `go install`ed tools (govulncheck, golangci-lint) are on PATH
+export PATH := `go env GOPATH` + "/bin:" + env("PATH")
+
 version := `cat VERSION | tr -d '[:space:]'`
 ldflags := "-s -w -X main.version=" + version
 tools := "kgc kgpv"
 
-# Show available recipes
 default:
     @just --list
 
@@ -35,12 +39,12 @@ test:
 vet:
     go vet ./...
 
-# Lint (requires `just setup`)
-lint:
+# Lint (installs golangci-lint if needed)
+lint: _install-golangci-lint
     golangci-lint run ./...
 
-# Auto-fix lint issues and format code (requires `just setup`)
-fix:
+# Auto-fix lint issues and format code
+fix: _install-golangci-lint
     golangci-lint run --fix ./...
     golangci-lint fmt ./...
 
@@ -52,9 +56,21 @@ fmt:
     go fmt ./...
     gofmt -s -w .
 
-# Tidy module dependencies
+# Tidy go.mod and go.sum
 tidy:
     go mod tidy
+
+# Update all module dependencies to latest compatible versions
+update-deps:
+    go get -u ./...
+    go mod tidy
+    @git --no-pager diff --stat -- go.mod go.sum
+
+# Update module dependencies to latest patch versions only
+update-deps-patch:
+    go get -u=patch ./...
+    go mod tidy
+    @git --no-pager diff --stat -- go.mod go.sum
 
 # Update the Go toolchain directive and all dependencies to latest, then tidy
 update:
@@ -62,12 +78,61 @@ update:
     go get -u ./...
     go mod tidy
 
-# Security scan (requires `just setup`)
-audit:
+# Scan for known Go vulnerabilities (same check as the release workflow)
+cve: _install-govulncheck
     govulncheck ./...
 
-# Run all checks: fmt, vet, lint, test, audit
-check: fmt vet lint test audit
+alias vuln := cve
+alias audit := cve
+
+# Bump vulnerable modules to patched versions, tidy, and re-scan
+fix-cves: _install-govulncheck
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "==> Scanning for known vulnerabilities..."
+    set +e
+    json=$(govulncheck -json ./... 2>/dev/null)
+    status=$?
+    set -e
+
+    if [[ "$status" -eq 0 ]]; then
+        echo "No vulnerabilities found."
+        exit 0
+    fi
+    if [[ "$status" -ne 3 ]]; then
+        echo "govulncheck failed (exit ${status})"
+        exit "$status"
+    fi
+
+    mapfile -t updates < <(printf '%s\n' "$json" | jq -r '
+        select(.finding != null)
+        | select(.finding.fixed_version != null and .finding.fixed_version != "")
+        | select(.finding.trace != null and (.finding.trace | length) > 0)
+        | .finding.trace[0] as $root
+        | select($root.module != null and $root.module != "" and $root.module != "stdlib")
+        | "\($root.module)@\(.finding.fixed_version)"
+    ' | sort -u)
+
+    if [[ ${#updates[@]} -eq 0 ]]; then
+        echo "Vulnerabilities found, but none can be auto-fixed (stdlib/toolchain, or no patched version)."
+        echo "Show details with: just cve"
+        echo "Try a broader bump with: just update-deps"
+        govulncheck ./...
+        exit 1
+    fi
+
+    echo "==> Bumping vulnerable modules:"
+    printf '  %s\n' "${updates[@]}"
+    go get "${updates[@]}"
+    go mod tidy
+    git --no-pager diff --stat -- go.mod go.sum
+
+    echo "==> Re-scanning..."
+    govulncheck ./...
+
+# Run all checks: fmt, vet, lint, test, cve
+check: fmt vet lint test cve
 
 # Remove build artifacts
 clean:
@@ -91,3 +156,13 @@ release-build:
                 go build -ldflags "{{ldflags}}" -o "$out" "./cmd/$tool"
         done
     done
+
+# Install govulncheck if it is not already on PATH
+[private]
+_install-govulncheck:
+    @command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@latest
+
+# Install golangci-lint if it is not already on PATH
+[private]
+_install-golangci-lint:
+    @command -v golangci-lint >/dev/null || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
