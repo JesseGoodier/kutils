@@ -1,6 +1,8 @@
 # kutils <!-- omit from toc -->
 
-Kubernetes CLI utilities.
+A collection of simple Kubernetes CLI utilities to save some keystrokes.
+
+This repo is designed t.  with links to others that I regularly use1. 
 
 - [Installation](#installation)
   - [Homebrew (macOS and Linux)](#homebrew-macos-and-linux)
@@ -22,6 +24,27 @@ Kubernetes CLI utilities.
 - **[kgpv](#kgpv)** — List PersistentVolumes with bound PVCs, pods, zones, storageClass and sizes
 
 ## Installation
+
+Potential for conflicting aliases:
+
+If you use many kubectl aliases (like with oh-my-zsh), you may already have a `kgpv` alias.
+To check: 
+
+```sh
+alias | grep kgpv
+```
+
+To unalias for your current session:
+
+```sh
+unalias kgpv
+```
+
+To make it permanent, add this to your ~/.zshrc:
+
+```sh
+echo "unalias kgpv" >> ~/.zshrc
+```
 
 ### Homebrew (macOS and Linux)
 
